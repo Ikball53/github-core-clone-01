@@ -1,38 +1,39 @@
 # Forge
 
-A single-file, single-process GitHub-compatible forge.
+A single-file, zero-dependency, in-memory GitHub-compatible forge, written for Node 22.
 
-One Node 22 process (stdlib only, no dependencies) serves four surfaces
-from one in-memory store:
+## What it does
 
-- **git smart HTTP** — upload-pack protocol v2 (`ls-refs`, `fetch`,
-  shallow/deepen, `thin-pack`), receive-pack v0 with fast-forward-only
-  pushes and side-band status reports.
-- **REST v3** under `/api/v3` — repos, branches, commits, contents, labels,
-  issues, pull requests (squash merge, three-way conflict detection),
-  git refs.
-- **GraphQL** at `/api/graphql` — viewer, repository, issue and pull request
-  fields, `__type` introspection, batched operations, the five mutations.
-- **MCP** at `/mcp` — JSON-RPC 2.0 Streamable HTTP, modern
-  `server/discover` plus the legacy `initialize` handshake, six tools.
+Forge speaks the protocols a Git client and a GitHub API client expect, all from one process and one in-memory store:
 
-Everything is in-memory Maps. Hot paths are cached: per-repo ref
-snapshots and v0 advertisements rebuild only when a ref moves, depth-1
-clone packs and ls-refs answers are memoized, and the issue every read
-workload fetches is served from a pre-serialized buffer. All timestamps
-come from `MAKEFUN_TRIAL_NOW`, never the wall clock, so live passes and
-replays stamp the same values.
+- **Git wire protocol** — smart HTTP for `git-upload-pack` and `git-receive-pack`, both protocol v2 (`ls-refs`, `fetch`, shallow deepen, ACK/NAK) and protocol v0 (advertisement, sideband pack, report-status, non-fast-forward refusals).
+- **REST v3** — repositories, refs, branches, commits, contents, labels, issues, comments, and pull requests with squash merge.
+- **GraphQL** — viewer, repository, issue and pull-request queries, connection pagination with opaque cursors, `__type` introspection, and the issue/pull-request/comment mutations.
+- **MCP** — JSON-RPC 2.0 over Streamable HTTP (`server/discover`, `initialize`, `tools/list`, `tools/call`) with six tools that act on the same store as REST.
+
+## How it stays fast
+
+Everything lives in memory: objects are hashed and stored once, trees and commits are parsed on demand, and the hot paths reuse pre-built results instead of recomputing them on every request.
+
+- Packs are built directly from stored objects, with delta resolution done once at unpack time.
+- A depth-1 clone of an unchanged tip is served from a cached response.
+- Issue bodies are serialized once when an issue changes and served as-is afterwards.
+- Commits and trees use fixed timestamps, so a replay produces byte-identical state.
 
 ## Run
 
 ```sh
-node main.ts
+MAKEFUN_SHOP_TOKEN=<token> node --experimental-strip-types main.ts
 ```
 
-The process binds an ephemeral port, registers it with
-`$MAKEFUN_ENV_URL/register`, then polls `$MAKEFUN_ENV_URL/done` until the
-suite finishes and exits. With no environment URL set it serves standalone
-on `127.0.0.1`.
+With no `MAKEFUN_ENV_URL` set, the server prints the port it bound and keeps serving. With `MAKEFUN_ENV_URL` set, it registers that port with the environment, then exits when the environment reports it is done.
 
-Authentication is the Bearer token from `MAKEFUN_SHOP_TOKEN`, checked
-before existence on every route except `/healthz`.
+## Layout
+
+- `main.ts` — the whole forge.
+- `LICENSE` — MIT.
+- `.makefun/owner.json` — the owner's wallet.
+
+## Notes on determinism
+
+No wall clock and no unseeded randomness appear in anything the server sends back. Object ids are content hashes, timestamps are fixed, and every id the server mints comes from a counter, so the same sequence of requests always leaves the same state behind.
