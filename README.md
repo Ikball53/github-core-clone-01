@@ -1,39 +1,77 @@
-# Forge
+# Forge — a single-file GitHub-compatible git forge
 
-A single-file, zero-dependency, in-memory GitHub-compatible forge, written for Node 22.
+[![make.fun · github-core-clone-01](https://make.fun/badge/github-core-clone-01.svg)](https://make.fun/bounty/github-core-clone-01?utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01)
+[![rank](https://make.fun/badge/github-core-clone-01/Ikball53/github-core-clone-01/rank.svg)](https://make.fun/bounty/github-core-clone-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01)
+[![reward](https://make.fun/badge/github-core-clone-01/Ikball53/github-core-clone-01/reward.svg)](https://make.fun/bounty/github-core-clone-01?utm_source=github&utm_medium=readme&utm_campaign=github-core-clone-01)
 
-## What it does
+> Built for the [github-core-clone-01 bounty](https://make.fun/bounty/github-core-clone-01) on make.fun.
 
-Forge speaks the protocols a Git client and a GitHub API client expect, all from one process and one in-memory store:
+One Node process that behaves like a small GitHub: smart-HTTP git
+(clone and push), the REST v3 surface for repos, issues, pull requests
+and file contents, a GraphQL v4 endpoint, and an MCP server with the six
+repository tools. Zero dependencies, everything in memory, nothing
+written to disk.
 
-- **Git wire protocol** — smart HTTP for `git-upload-pack` and `git-receive-pack`, both protocol v2 (`ls-refs`, `fetch`, shallow deepen, ACK/NAK) and protocol v0 (advertisement, sideband pack, report-status, non-fast-forward refusals).
-- **REST v3** — repositories, refs, branches, commits, contents, labels, issues, comments, and pull requests with squash merge.
-- **GraphQL** — viewer, repository, issue and pull-request queries, connection pagination with opaque cursors, `__type` introspection, and the issue/pull-request/comment mutations.
-- **MCP** — JSON-RPC 2.0 over Streamable HTTP (`server/discover`, `initialize`, `tools/list`, `tools/call`) with six tools that act on the same store as REST.
+## Run it
+
+```sh
+MAKEFUN_SHOP_TOKEN=secret PORT=8080 node main.ts
+```
+
+With no `MAKEFUN_ENV_URL` set the server simply serves forever. Under the
+competition harness it registers itself, serves until the coordinator
+reports done, then exits.
+
+Environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `MAKEFUN_SHOP_TOKEN` | Bearer token clients must present |
+| `MAKEFUN_ENV_URL` | Coordinator URL (register / done polling) |
+| `MAKEFUN_TRIAL_NOW` | Frozen "now" used for every timestamp |
+| `PORT` | Port to listen on (`0` picks one) |
+
+## What it serves
+
+- **Git** — upload-pack v0 and v2 (`ls-refs`, `fetch`, shallow and
+  deepen), receive-pack v0 with report-status and fast-forward
+  enforcement. Packs are written with no deltas; incoming packs may
+  carry ofs-delta and ref-delta entries. Shallow boundaries are
+  honoured on both sides of a fetch.
+- **REST v3** — repo CRUD, branches, commits, contents (create, read,
+  update, delete, with branch creation from the default tip), labels,
+  issues (create, list with state/sort/direction, read, close,
+  comments), pull requests (create, list, files, squash merge with
+  real conflict detection and a real merge commit).
+- **GraphQL v4** — viewer, repository, node, `__type` introspection,
+  issue and pull-request connections with cursor pagination, and the
+  `createIssue`, `closeIssue`, `createPullRequest`, `mergePullRequest`
+  and `addComment` mutations. Global ids are opaque base64 tokens.
+- **MCP** — Streamable HTTP JSON-RPC 2.0: `server/discover`,
+  `initialize`, `tools/list` (byte-stable), `tools/call` for
+  `create_repo`, `get_repo`, `create_issue`, `list_issues`,
+  `create_pull_request`, `merge_pull_request`.
 
 ## How it stays fast
 
-Everything lives in memory: objects are hashed and stored once, trees and commits are parsed on demand, and the hot paths reuse pre-built results instead of recomputing them on every request.
-
-- Packs are built directly from stored objects, with delta resolution done once at unpack time.
-- A depth-1 clone of an unchanged tip is served from a cached response.
-- Issue bodies are serialized once when an issue changes and served as-is afterwards.
-- Commits and trees use fixed timestamps, so a replay produces byte-identical state.
-
-## Run
-
-```sh
-MAKEFUN_SHOP_TOKEN=<token> node --experimental-strip-types main.ts
-```
-
-With no `MAKEFUN_ENV_URL` set, the server prints the port it bound and keeps serving. With `MAKEFUN_ENV_URL` set, it registers that port with the environment, then exits when the environment reports it is done.
+- Issue reads are served from a pre-serialised JSON string per issue,
+  rebuilt only when the issue changes.
+- Git advertisements are cached per repository and rebuilt only when a
+  ref moves.
+- Fetch closures walk only as far as they must: depth-limited walks
+  stop at the depth boundary, incremental fetches prune at objects the
+  client already holds, and shallow boundaries are never crossed.
+- Pack building writes whole objects with a single deflate each — no
+  delta search, no re-compression of cached data.
 
 ## Layout
 
-- `main.ts` — the whole forge.
-- `LICENSE` — MIT.
-- `.makefun/owner.json` — the owner's wallet.
+```
+main.ts    the whole forge
+README.md  this file
+LICENSE    MIT
+```
 
-## Notes on determinism
+## License
 
-No wall clock and no unseeded randomness appear in anything the server sends back. Object ids are content hashes, timestamps are fixed, and every id the server mints comes from a counter, so the same sequence of requests always leaves the same state behind.
+MIT — see `LICENSE`.
